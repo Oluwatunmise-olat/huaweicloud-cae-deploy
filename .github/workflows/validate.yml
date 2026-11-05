@@ -1,0 +1,37 @@
+name: Validate
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-metadata:
+    name: Validate action.yml metadata
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate action metadata files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in action.yml auth/action.yml; do
+            echo "::group::$f"
+            ruby -ryaml -e '
+              f = ARGV[0]
+              m = YAML.load_file(f)
+              %w[name description runs].each do |k|
+                abort "#{f}: missing required key \"#{k}\"" unless m.key?(k)
+              end
+              abort "#{f}: runs.using must be composite" unless m.dig("runs", "using") == "composite"
+              if m.key?("branding")
+                %w[icon color].each { |k| abort "#{f}: branding missing \"#{k}\"" unless m["branding"].key?(k) }
+              end
+              puts "OK: #{m["name"]} (#{m["runs"]["using"]})"
+            ' "$f"
+            echo "::endgroup::"
+          done

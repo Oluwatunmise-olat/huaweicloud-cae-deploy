@@ -34,7 +34,8 @@ runs:
           echo "$HOME/.hcloud/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.hcloud/bin:$PATH"
         fi
-        hcloud configure set --cli-agree-privacy-statement=true >/dev/null
+        hcloud configure set --cli-agree-privacy-statement=true \
+          --cli-read-timeout=20 --cli-connect-timeout=10 >/dev/null
         hcloud version
 
     - name: Upgrade CAE component
@@ -82,7 +83,8 @@ runs:
           echo "$id"
         }
 
-        ENV_ID="$(find_id Environment "$ENVIRONMENT_NAME" CAE ListEnvironments --project_id="$PROJECT_ID")"
+        ENV_ID="$(find_id Environment "$ENVIRONMENT_NAME" CAE ListEnvironments \
+          --X-Enterprise-Project-ID="$EPI" --project_id="$PROJECT_ID")"
         APP_ID="$(find_id Application "$APP_NAME" CAE ListApplications \
           --X-Environment-ID="$ENV_ID" --X-Enterprise-Project-ID="$EPI" --project_id="$PROJECT_ID")"
         COMPONENT_ID="$(find_id Component "$COMPONENT_NAME" CAE ListComponents \

@@ -1,5 +1,7 @@
 # **Huawei Cloud CAE Deploy Action**
 
+[![Validate](https://github.com/Oluwatunmise-olat/huaweicloud-cae-deploy/actions/workflows/validate.yml/badge.svg)](https://github.com/Oluwatunmise-olat/huaweicloud-cae-deploy/actions/workflows/validate.yml)
+
 This GitHub Action upgrades a component in **Huawei Cloud Cloud Application Engine (CAE)** to a new image, without storing long-lived Access Key / Secret Key pairs in your repository. It uses the **Huawei Cloud CLI (`hcloud`)** and, optionally, a companion `auth` action that exchanges GitHub's OIDC token for short-lived STS credentials.
 
 It mirrors the shape of the `google-github-actions` pair:
@@ -89,7 +91,7 @@ A complete, runnable example is in [`examples/deploy-cae.yml`](examples/deploy-c
 | `sts-region` | Region whose STS endpoint is called | No | `ap-southeast-1` |
 | `audience` | Must match the IdP's audience | No | `sts.huaweicloud.com` |
 | `duration-seconds` | Credential lifetime, 900-43200 | No | `3600` |
-| `session-name` | Appears in CTS audit logs | No | `gha-<run_id>-<attempt>` |
+| `session-name` | Appears in CTS audit logs (2-128 chars, `[A-Za-z0-9_+=,.@-]`) | No | `gha-<run_id>-<attempt>` |
 
 Output: `expiration`.
 
@@ -126,6 +128,7 @@ Output: `expiration`.
 * A CAE environment, application, and component already created
 * Project ID and, if applicable, Enterprise Project ID
 * An SWR image repository already populated (via CI/CD or manual push)
+* A runner with `bash`, `curl`, and `jq` available (all pre-installed on `ubuntu-latest`); the action also installs `hcloud` (KooCLI) on first use
 
 ---
 
