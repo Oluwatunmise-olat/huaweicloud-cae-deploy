@@ -1,0 +1,68 @@
+---
+name: Authenticate to Huawei Cloud (OIDC)
+description: Get short-lived Huawei Cloud credentials from a GitHub OIDC token.
+author: "Oluwatunmise Olatunbosun"
+branding:
+  icon: key
+  color: red
+
+inputs:
+  provider-urn:     {description: "IAM v5 OIDC provider URN, iam::<account-id>:oidcProvider:<name>", required: true}
+  agency-urn:       {description: "IAM v5 agency URN, iam::<account-id>:agency:<name>", required: true}
+  sts-region:       {description: STS region to call, required: false, default: ap-southeast-1}
+  audience:         {description: OIDC audience; must match the IdP config, required: false, default: sts.huaweicloud.com}
+  duration-seconds: {description: Credential lifetime (900-43200), required: false, default: "3600"}
+  session-name:     {description: Agency session name (shows in CTS audit logs), required: false, default: ""}
+
+outputs:
+  expiration: {description: Credential expiry (RFC 3339), value: "${{ steps.sts.outputs.expiration }}"}
+
+runs:
+  using: composite
+  steps:
+    - id: sts
+      shell: bash
+      env:
+        PROVIDER_URN: ${{ inputs.provider-urn }}
+        AGENCY_URN: ${{ inputs.agency-urn }}
+        STS_REGION: ${{ inputs.sts-region }}
+        AUDIENCE: ${{ inputs.audience }}
+        DURATION: ${{ inputs.duration-seconds }}
+        SESSION_NAME: ${{ inputs.session-name || format('gha-{0}-{1}', github.run_id, github.run_attempt) }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+          echo "No OIDC token available. Add 'permissions: id-token: write' to the job." >&2
+          exit 1
+        fi
+
+        jwt="$(curl -fsS --retry 2 -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          --get --data-urlencode "audience=$AUDIENCE" "$ACTIONS_ID_TOKEN_REQUEST_URL" | jq -er .value)"
+        echo "::add-mask::$jwt"
+
+        body="$(jq -n --arg t "$jwt" --arg p "$PROVIDER_URN" --arg a "$AGENCY_URN" \
+          --arg s "$SESSION_NAME" --argjson d "$DURATION" \
+          '{id_token:$t, provider_urn:$p, agency_urn:$a, agency_session_name:$s, duration_seconds:$d}')"
+
+        url="https://sts.${STS_REGION}.myhuaweicloud.com/v5/agencies/assume-with-oidc"
+        echo "Assuming $AGENCY_URN via $url" >&2
+        if ! res="$(curl -sS --retry 2 --fail-with-body -H 'Content-Type: application/json' \
+              --data "$body" "$url")"; then
+          echo "STS rejected the request (check trust policy oidc:sub/aud/iss):" >&2
+          echo "$res" >&2
+          exit 1
+        fi
+
+        ak="$(jq -er .credentials.access_key_id <<<"$res")"
+        sk="$(jq -er .credentials.secret_access_key <<<"$res")"
+        st="$(jq -er .credentials.security_token <<<"$res")"
+        echo "::add-mask::$ak"; echo "::add-mask::$sk"; echo "::add-mask::$st"
+
+        {
+          echo "HUAWEICLOUD_SDK_AK=$ak"
+          echo "HUAWEICLOUD_SDK_SK=$sk"
+          echo "HUAWEICLOUD_SDK_SECURITY_TOKEN=$st"
+        } >> "$GITHUB_ENV"
+        echo "expiration=$(jq -r .credentials.expiration <<<"$res")" >> "$GITHUB_OUTPUT"
+        echo "Assumed $(jq -r .assumed_agency.urn <<<"$res")" >&2

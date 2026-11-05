@@ -1,0 +1,19 @@
+{
+  "Version": "5.0",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["sts:agencies:assumeWithOIDC"],
+      "Principal": {
+        "Federated": ["iam::<ACCOUNT_ID>:oidcProvider:github_com"]
+      },
+      "Condition": {
+        "StringEquals": {
+          "oidc:aud": ["sts.huaweicloud.com"],
+          "oidc:iss": ["https://token.actions.githubusercontent.com"],
+          "oidc:sub": ["repo:<ORG>/<REPO>:environment:production"]
+        }
+      }
+    }
+  ]
+}

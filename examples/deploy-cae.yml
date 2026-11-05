@@ -1,0 +1,47 @@
+# Copy into your APP repo as .github/workflows/deploy-cae.yml
+name: Deploy to CAE
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: cae-deploy-${{ github.repository }}-production
+      cancel-in-progress: false
+    env:
+      IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Huawei Cloud (OIDC)
+        uses: Oluwatunmise-olat/huaweicloud-cae-deploy/auth@FULL_COMMIT_SHA
+        with:
+          provider-urn: ${{ vars.HUAWEI_OIDC_PROVIDER_URN }}
+          agency-urn: ${{ vars.HUAWEI_AGENCY_URN }}
+          sts-region: af-south-1 # fall back to ap-southeast-1 if unreachable
+
+      # ... build and push the image to SWR here, tagged $IMAGE_TAG ...
+
+      - name: Deploy to CAE
+        uses: Oluwatunmise-olat/huaweicloud-cae-deploy@FULL_COMMIT_SHA
+        with:
+          project_id: ${{ vars.HUAWEI_PROJECT_ID }}
+          region: af-south-1
+          environment_name: redacted
+          app_name: redacted
+          component_name: redacted-core
+          swr_organization: redacted
+          swr_repository: redacted-core
+          image_tag: ${{ env.IMAGE_TAG }}
+          version: ${{ github.sha }}

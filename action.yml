@@ -1,0 +1,101 @@
+---
+name: Deploy to Huawei Cloud CAE
+description: Upgrade a CAE component to a new SWR image (supports STS temporary credentials).
+author: "Oluwatunmise Olatunbosun"
+branding:
+  icon: upload-cloud
+  color: red
+
+inputs:
+  project_id:            {description: Project ID, required: true}
+  environment_name:      {description: CAE environment name, required: true}
+  app_name:              {description: CAE application name, required: true}
+  component_name:        {description: CAE component name, required: true}
+  version:               {description: Version annotation (defaults to image_tag), required: false, default: ""}
+  accessKey:             {description: Access Key ID (defaults to $HUAWEICLOUD_SDK_AK), required: false, default: ""}
+  secretKey:             {description: Secret Access Key (defaults to $HUAWEICLOUD_SDK_SK), required: false, default: ""}
+  securityToken:         {description: Security token (defaults to $HUAWEICLOUD_SDK_SECURITY_TOKEN), required: false, default: ""}
+  region:                {description: Region e.g. af-south-1, required: true}
+  enterprise_project_id: {description: Enterprise project ID, required: false, default: "0"}
+  swr_organization:      {description: SWR organization, required: true}
+  swr_repository:        {description: SWR repository, required: true}
+  image_tag:             {description: Image tag, required: true}
+
+runs:
+  using: composite
+  steps:
+    - name: Install KooCLI (hcloud)
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v hcloud >/dev/null; then
+          curl -fsSL https://hwcloudcli.obs.cn-north-1.myhuaweicloud.com/cli/latest/hcloud_install.sh -o /tmp/hcloud_install.sh
+          bash /tmp/hcloud_install.sh -y
+          echo "$HOME/.hcloud/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.hcloud/bin:$PATH"
+        fi
+        hcloud configure set --cli-agree-privacy-statement=true >/dev/null
+        hcloud version
+
+    - name: Upgrade CAE component
+      shell: bash
+      env:
+        PROJECT_ID: ${{ inputs.project_id }}
+        ENVIRONMENT_NAME: ${{ inputs.environment_name }}
+        APP_NAME: ${{ inputs.app_name }}
+        COMPONENT_NAME: ${{ inputs.component_name }}
+        VERSION: ${{ inputs.version }}
+        ACCESS_KEY: ${{ inputs.accessKey }}
+        SECRET_KEY: ${{ inputs.secretKey }}
+        SECURITY_TOKEN: ${{ inputs.securityToken }}
+        REGION: ${{ inputs.region }}
+        EPI: ${{ inputs.enterprise_project_id }}
+        SWR_ORG: ${{ inputs.swr_organization }}
+        SWR_REPO: ${{ inputs.swr_repository }}
+        IMAGE_TAG: ${{ inputs.image_tag }}
+      run: |
+        set -euo pipefail
+        ACCESS_KEY="${ACCESS_KEY:-${HUAWEICLOUD_SDK_AK:-}}"
+        SECRET_KEY="${SECRET_KEY:-${HUAWEICLOUD_SDK_SK:-}}"
+        SECURITY_TOKEN="${SECURITY_TOKEN:-${HUAWEICLOUD_SDK_SECURITY_TOKEN:-}}"
+        if [[ -z "$ACCESS_KEY" || -z "$SECRET_KEY" ]]; then
+          echo "No credentials. Run an auth step first (e.g. configure-huawei-cloud-credentials) or pass accessKey/secretKey." >&2
+          exit 1
+        fi
+        echo "::add-mask::$SECRET_KEY"
+        if [[ -n "$SECURITY_TOKEN" ]]; then echo "::add-mask::$SECURITY_TOKEN"; fi
+
+        HC=(--cli-region="$REGION" --cli-access-key="$ACCESS_KEY" --cli-secret-key="$SECRET_KEY")
+        if [[ -n "$SECURITY_TOKEN" ]]; then HC+=(--cli-security-token="$SECURITY_TOKEN"); fi
+        EPI="${EPI:-0}"
+        VERSION="${VERSION:-$IMAGE_TAG}"
+
+        find_id() {
+          local label="$1" name="$2"; shift 2
+          local out id
+          if ! out="$(hcloud "$@" "${HC[@]}" 2>&1)"; then
+            echo "$label lookup failed:" >&2; echo "$out" >&2; exit 1
+          fi
+          id="$(jq -r --arg n "$name" '.items[]? | select(.name == $n) | .id' <<<"$out" | head -n1)"
+          if [[ -z "$id" ]]; then echo "$label '$name' not found" >&2; exit 1; fi
+          echo "$label '$name' -> $id" >&2
+          echo "$id"
+        }
+
+        ENV_ID="$(find_id Environment "$ENVIRONMENT_NAME" CAE ListEnvironments --project_id="$PROJECT_ID")"
+        APP_ID="$(find_id Application "$APP_NAME" CAE ListApplications \
+          --X-Environment-ID="$ENV_ID" --X-Enterprise-Project-ID="$EPI" --project_id="$PROJECT_ID")"
+        COMPONENT_ID="$(find_id Component "$COMPONENT_NAME" CAE ListComponents \
+          --X-Environment-ID="$ENV_ID" --X-Enterprise-Project-ID="$EPI" \
+          --application_id="$APP_ID" --project_id="$PROJECT_ID")"
+
+        IMAGE_URL="swr.${REGION}.myhuaweicloud.com/${SWR_ORG}/${SWR_REPO}:${IMAGE_TAG}"
+        echo "Upgrading $COMPONENT_NAME to $IMAGE_URL (version $VERSION)"
+
+        hcloud CAE ExecuteAction "${HC[@]}" \
+          --X-Environment-ID="$ENV_ID" --X-Enterprise-Project-ID="$EPI" \
+          --application_id="$APP_ID" --component_id="$COMPONENT_ID" --project_id="$PROJECT_ID" \
+          --kind=Action --api_version=v1 --metadata.name=upgrade \
+          --metadata.annotations.version="$VERSION" \
+          --spec.source.type=image --spec.source.url="$IMAGE_URL"
+        echo "Upgrade action submitted"
